@@ -6,6 +6,19 @@
 #property copyright "Mean Reversion Strategy"
 #property link      "https://www.github.com"
 #property version   "1.00"
+#property description "Пълнофункционален Expert Advisor за MetaTrader 5"
+#property description "Имплементира Mean Reversion стратегия с тренд филтър"
+#property description ""
+#property description "Индикатори:"
+#property description "- SMMA 200: Тренд филтър (над=BUY, под=SELL)"
+#property description "- QQE Signals: Тригери за влизане"
+#property description "- Mean Reversion Channel: Зони за действие"
+#property description "- Heikin-Ashi Volume: Потвърждение на обема"
+#property description ""
+#property description "Управление на риска:"
+#property description "- ATR-базиран Stop Loss и Take Profit"
+#property description "- Процент от баланса за размер на лота"
+#property description "- Максимум 3 едновременни позиции"
 #property strict
 
 #include <Trade\Trade.mqh>
