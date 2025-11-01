@@ -1,0 +1,7 @@
+//@version=3
+study(title = "Smoothed Moving Average [ablack13] - SMMA 200", shorttitle="SMMA[ablack13]", overlay=true)
+len = input(200, minval=1, title="Length")      // set to 200 for SMMA 200
+src = input(close, title="Source")
+smma = 0.0
+smma := na(smma[1]) ? sma(src, len) : (smma[1] * (len - 1) + src) / len
+plot(smma, color=#41f2ec)
