@@ -62,7 +62,17 @@ int OnInit()
     //--- Инициализация на trade обект
     trade.SetExpertMagicNumber(MagicNumber);
     trade.SetDeviationInPoints(10);
-    trade.SetTypeFilling(ORDER_FILLING_FOK);
+    
+    //--- Определяне на режим на изпълнение
+    ENUM_SYMBOL_TRADE_EXECUTION exec_mode = (ENUM_SYMBOL_TRADE_EXECUTION)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_EXEMODE);
+    if(exec_mode == SYMBOL_TRADE_EXECUTION_MARKET)
+    {
+        trade.SetTypeFilling(ORDER_FILLING_FOK);
+    }
+    else
+    {
+        trade.SetTypeFilling(ORDER_FILLING_RETURN);
+    }
     
     //--- Създаване на ATR индикатор
     atrHandle = iATR(_Symbol, PERIOD_H1, ATR_Period);
@@ -84,7 +94,8 @@ int OnInit()
     ArraySetAsSeries(haVolumeBuffer, true);
     ArraySetAsSeries(haVolumeMaBuffer, true);
     
-    Print("Expert Advisor инициализиран успешно");
+    Print("Expert Advisor инициализиран успешно за символ: ", _Symbol);
+    Print("Параметри: SMMA=", SMMA_Period, " MRC=", MRC_Length, " ATR=", ATR_Period);
     return INIT_SUCCEEDED;
 }
 
@@ -146,34 +157,34 @@ void OnTick()
 //+------------------------------------------------------------------+
 bool CalculateSMMA()
 {
-    ArrayResize(smmaBuffer, SMMA_Period + 10);
-    
-    double sum = 0.0;
     int barsCalculated = Bars(_Symbol, PERIOD_H1);
     
-    if(barsCalculated < SMMA_Period + 1)
+    if(barsCalculated < SMMA_Period + 10)
         return false;
     
-    //--- Изчисление на SMMA
-    for(int i = 0; i < SMMA_Period + 10; i++)
+    int copyBars = SMMA_Period + 10;
+    ArrayResize(smmaBuffer, copyBars);
+    
+    //--- Изчисление на SMMA от най-стария до най-новия бар
+    // Започваме от най-стария бар (index = copyBars-1)
+    for(int i = copyBars - 1; i >= 0; i--)
     {
         double close = iClose(_Symbol, PERIOD_H1, i);
         
-        if(i >= SMMA_Period)
-        {
-            // SMMA формула: (SMMA[1] * (len - 1) + close) / len
-            smmaBuffer[i] = (smmaBuffer[i-1] * (SMMA_Period - 1) + close) / SMMA_Period;
-        }
-        else if(i == SMMA_Period - 1)
+        if(i == copyBars - 1)
         {
             // Първа стойност - SMA
+            double sum = 0.0;
             for(int j = 0; j < SMMA_Period; j++)
+            {
                 sum += iClose(_Symbol, PERIOD_H1, i + j);
+            }
             smmaBuffer[i] = sum / SMMA_Period;
         }
         else
         {
-            smmaBuffer[i] = 0;
+            // SMMA формула: (SMMA[1] * (len - 1) + close) / len
+            smmaBuffer[i] = (smmaBuffer[i+1] * (SMMA_Period - 1) + close) / SMMA_Period;
         }
     }
     
@@ -410,39 +421,46 @@ bool CalculateHeikinAshiVolume()
     if(barsCalculated < HA_MA_Length + 10)
         return false;
     
-    ArrayResize(haVolumeBuffer, HA_MA_Length + 10);
-    ArrayResize(haVolumeMaBuffer, HA_MA_Length + 10);
+    int copyBars = HA_MA_Length + 10;
+    ArrayResize(haVolumeBuffer, copyBars);
+    ArrayResize(haVolumeMaBuffer, copyBars);
     
-    //--- Изчисление на Heikin-Ashi свещи
-    double haOpen = 0, haClose = 0;
+    //--- Изчисление на Heikin-Ashi свещи и volume
+    // Трябва да изчислим от най-стария към най-новия за HA рекурсията
+    double haOpenArray[];
+    double haCloseArray[];
+    ArrayResize(haOpenArray, copyBars);
+    ArrayResize(haCloseArray, copyBars);
     
-    for(int i = HA_MA_Length + 9; i >= 0; i--)
+    for(int i = copyBars - 1; i >= 0; i--)
     {
         double open = iOpen(_Symbol, PERIOD_H1, i);
         double high = iHigh(_Symbol, PERIOD_H1, i);
         double low = iLow(_Symbol, PERIOD_H1, i);
         double close = iClose(_Symbol, PERIOD_H1, i);
         
-        haClose = (open + high + low + close) / 4.0;
+        haCloseArray[i] = (open + high + low + close) / 4.0;
         
-        if(i == HA_MA_Length + 9)
-            haOpen = (open + close) / 2.0;
+        if(i == copyBars - 1)
+            haOpenArray[i] = (open + close) / 2.0;
         else
-            haOpen = (haOpen + haClose) / 2.0;  // Използваме предишните HA стойности
+            haOpenArray[i] = (haOpenArray[i+1] + haCloseArray[i+1]) / 2.0;
         
-        //--- Volume scaled
+        //--- Volume scaled - просто копираме volume, не зависи от HA посоката
         long volume = iVolume(_Symbol, PERIOD_H1, i);
         haVolumeBuffer[i] = volume / HA_Divider;
     }
     
     //--- Изчисление на SMA на volume
-    for(int i = 0; i < HA_MA_Length + 10; i++)
+    for(int i = 0; i < copyBars; i++)
     {
+        if(i + HA_MA_Length > copyBars)
+            continue;
+            
         double sum = 0;
         for(int j = 0; j < HA_MA_Length; j++)
         {
-            if(i + j < ArraySize(haVolumeBuffer))
-                sum += haVolumeBuffer[i + j];
+            sum += haVolumeBuffer[i + j];
         }
         haVolumeMaBuffer[i] = sum / HA_MA_Length;
     }
@@ -537,11 +555,22 @@ void OpenBuyPosition()
     //--- Отваряне на позиция
     if(trade.Buy(lotSize, _Symbol, ask, sl, tp, "BUY Signal"))
     {
-        Print("BUY позиция отворена успешно: Lot=", lotSize, " SL=", sl, " TP=", tp);
+        Print("BUY позиция отворена успешно: Lot=", lotSize, " Entry=", ask, " SL=", sl, " TP=", tp);
     }
     else
     {
-        Print("Грешка при отваряне на BUY позиция: ", trade.ResultRetcodeDescription());
+        int error = trade.ResultRetcode();
+        Print("Грешка при отваряне на BUY позиция: ", trade.ResultRetcodeDescription(), " (", error, ")");
+        
+        //--- Опит с различен filling mode
+        if(error == 10030) // ERR_INVALID_FILLING
+        {
+            trade.SetTypeFilling(ORDER_FILLING_IOC);
+            if(trade.Buy(lotSize, _Symbol, ask, sl, tp, "BUY Signal"))
+            {
+                Print("BUY позиция отворена с IOC filling mode");
+            }
+        }
     }
 }
 
@@ -572,11 +601,22 @@ void OpenSellPosition()
     //--- Отваряне на позиция
     if(trade.Sell(lotSize, _Symbol, bid, sl, tp, "SELL Signal"))
     {
-        Print("SELL позиция отворена успешно: Lot=", lotSize, " SL=", sl, " TP=", tp);
+        Print("SELL позиция отворена успешно: Lot=", lotSize, " Entry=", bid, " SL=", sl, " TP=", tp);
     }
     else
     {
-        Print("Грешка при отваряне на SELL позиция: ", trade.ResultRetcodeDescription());
+        int error = trade.ResultRetcode();
+        Print("Грешка при отваряне на SELL позиция: ", trade.ResultRetcodeDescription(), " (", error, ")");
+        
+        //--- Опит с различен filling mode
+        if(error == 10030) // ERR_INVALID_FILLING
+        {
+            trade.SetTypeFilling(ORDER_FILLING_IOC);
+            if(trade.Sell(lotSize, _Symbol, bid, sl, tp, "SELL Signal"))
+            {
+                Print("SELL позиция отворена с IOC filling mode");
+            }
+        }
     }
 }
 
