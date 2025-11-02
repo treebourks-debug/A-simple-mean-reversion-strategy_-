@@ -52,6 +52,10 @@ input group "=== Heikin-Ashi Volume параметри ==="
 input double   HA_Divider = 4.0;               // Volume делител
 input int      HA_MA_Length = 20;              // Volume MA период
 
+//--- Константи
+#define BUFFER_SIZE 300
+#define TRADE_RETCODE_INVALID_FILL 10030
+
 //--- Глобални променливи
 CTrade trade;
 int atrHandle;
@@ -66,6 +70,7 @@ double mrcLowerOuterBuffer[];
 double haVolumeBuffer[];
 double haVolumeMaBuffer[];
 datetime lastBarTime = 0;
+bool buffersInitialized = false;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -106,6 +111,21 @@ int OnInit()
     ArraySetAsSeries(mrcLowerOuterBuffer, true);
     ArraySetAsSeries(haVolumeBuffer, true);
     ArraySetAsSeries(haVolumeMaBuffer, true);
+    
+    //--- Предварително заделяне на памет за буферите
+    int maxPeriod = MathMax(MathMax(SMMA_Period, MRC_Length), BUFFER_SIZE);
+    ArrayResize(smmaBuffer, maxPeriod + 10);
+    ArrayResize(qqeLongBuffer, BUFFER_SIZE);
+    ArrayResize(qqeShortBuffer, BUFFER_SIZE);
+    ArrayResize(mrcMeanBuffer, maxPeriod + 10);
+    ArrayResize(mrcUpperInnerBuffer, maxPeriod + 10);
+    ArrayResize(mrcLowerInnerBuffer, maxPeriod + 10);
+    ArrayResize(mrcUpperOuterBuffer, maxPeriod + 10);
+    ArrayResize(mrcLowerOuterBuffer, maxPeriod + 10);
+    ArrayResize(haVolumeBuffer, HA_MA_Length + 10);
+    ArrayResize(haVolumeMaBuffer, HA_MA_Length + 10);
+    
+    buffersInitialized = true;
     
     Print("Expert Advisor инициализиран успешно за символ: ", _Symbol);
     Print("Параметри: SMMA=", SMMA_Period, " MRC=", MRC_Length, " ATR=", ATR_Period);
@@ -176,7 +196,6 @@ bool CalculateSMMA()
         return false;
     
     int copyBars = SMMA_Period + 10;
-    ArrayResize(smmaBuffer, copyBars);
     
     //--- Изчисление на SMMA от най-стария до най-новия бар
     // Започваме от най-стария бар (index = copyBars-1)
@@ -213,9 +232,6 @@ bool CalculateQQE()
     if(barsCalculated < RSI_Period + RSI_Smoothing + 100)
         return false;
     
-    ArrayResize(qqeLongBuffer, 300);
-    ArrayResize(qqeShortBuffer, 300);
-    
     double rsiBuffer[];
     double rsiMaBuffer[];
     double atrRsiBuffer[];
@@ -228,20 +244,20 @@ bool CalculateQQE()
     int qqeXlongBuffer[];
     int qqeXshortBuffer[];
     
-    ArrayResize(rsiBuffer, 300);
-    ArrayResize(rsiMaBuffer, 300);
-    ArrayResize(atrRsiBuffer, 300);
-    ArrayResize(maAtrRsiBuffer, 300);
-    ArrayResize(darBuffer, 300);
-    ArrayResize(longbandBuffer, 300);
-    ArrayResize(shortbandBuffer, 300);
-    ArrayResize(trendBuffer, 300);
-    ArrayResize(fastAtrRsiTLBuffer, 300);
-    ArrayResize(qqeXlongBuffer, 300);
-    ArrayResize(qqeXshortBuffer, 300);
+    ArrayResize(rsiBuffer, BUFFER_SIZE);
+    ArrayResize(rsiMaBuffer, BUFFER_SIZE);
+    ArrayResize(atrRsiBuffer, BUFFER_SIZE);
+    ArrayResize(maAtrRsiBuffer, BUFFER_SIZE);
+    ArrayResize(darBuffer, BUFFER_SIZE);
+    ArrayResize(longbandBuffer, BUFFER_SIZE);
+    ArrayResize(shortbandBuffer, BUFFER_SIZE);
+    ArrayResize(trendBuffer, BUFFER_SIZE);
+    ArrayResize(fastAtrRsiTLBuffer, BUFFER_SIZE);
+    ArrayResize(qqeXlongBuffer, BUFFER_SIZE);
+    ArrayResize(qqeXshortBuffer, BUFFER_SIZE);
     
     //--- Изчисление на RSI
-    for(int i = 299; i >= 0; i--)
+    for(int i = BUFFER_SIZE - 1; i >= 0; i--)
     {
         double gains = 0, losses = 0;
         for(int j = 0; j < RSI_Period; j++)
@@ -260,9 +276,9 @@ bool CalculateQQE()
     
     //--- RSI EMA изглаждане
     double multiplier = 2.0 / (RSI_Smoothing + 1);
-    for(int i = 299; i >= 0; i--)
+    for(int i = BUFFER_SIZE - 1; i >= 0; i--)
     {
-        if(i == 299)
+        if(i == BUFFER_SIZE - 1)
             rsiMaBuffer[i] = rsiBuffer[i];
         else
             rsiMaBuffer[i] = (rsiBuffer[i] - rsiMaBuffer[i+1]) * multiplier + rsiMaBuffer[i+1];
@@ -270,9 +286,9 @@ bool CalculateQQE()
     
     //--- ATR на RSI
     int wildersPeriod = RSI_Period * 2 - 1;
-    for(int i = 299; i >= 0; i--)
+    for(int i = BUFFER_SIZE - 1; i >= 0; i--)
     {
-        if(i < 299)
+        if(i < BUFFER_SIZE - 1)
             atrRsiBuffer[i] = MathAbs(rsiMaBuffer[i+1] - rsiMaBuffer[i]);
         else
             atrRsiBuffer[i] = 0;
@@ -280,18 +296,18 @@ bool CalculateQQE()
     
     //--- MaAtrRsi
     multiplier = 2.0 / (wildersPeriod + 1);
-    for(int i = 299; i >= 0; i--)
+    for(int i = BUFFER_SIZE - 1; i >= 0; i--)
     {
-        if(i == 299)
+        if(i == BUFFER_SIZE - 1)
             maAtrRsiBuffer[i] = atrRsiBuffer[i];
         else
             maAtrRsiBuffer[i] = (atrRsiBuffer[i] - maAtrRsiBuffer[i+1]) * multiplier + maAtrRsiBuffer[i+1];
     }
     
     //--- dar (второ EMA изглаждане)
-    for(int i = 299; i >= 0; i--)
+    for(int i = BUFFER_SIZE - 1; i >= 0; i--)
     {
-        if(i == 299)
+        if(i == BUFFER_SIZE - 1)
             darBuffer[i] = maAtrRsiBuffer[i] * QQE_Factor;
         else
             darBuffer[i] = (maAtrRsiBuffer[i] - darBuffer[i+1]) * multiplier + darBuffer[i+1];
@@ -299,14 +315,14 @@ bool CalculateQQE()
     }
     
     //--- Изчисление на ленти и тренд
-    for(int i = 299; i >= 0; i--)
+    for(int i = BUFFER_SIZE - 1; i >= 0; i--)
     {
         double deltaFastAtrRsi = darBuffer[i];
         double rsIndex = rsiMaBuffer[i];
         double newshortband = rsIndex + deltaFastAtrRsi;
         double newlongband = rsIndex - deltaFastAtrRsi;
         
-        if(i < 299)
+        if(i < BUFFER_SIZE - 1)
         {
             longbandBuffer[i] = (rsiMaBuffer[i+1] > longbandBuffer[i+1] && rsIndex > longbandBuffer[i+1]) ? 
                                  MathMax(longbandBuffer[i+1], newlongband) : newlongband;
@@ -329,9 +345,9 @@ bool CalculateQQE()
     }
     
     //--- QQE сигнали
-    for(int i = 299; i >= 0; i--)
+    for(int i = BUFFER_SIZE - 1; i >= 0; i--)
     {
-        if(i < 299)
+        if(i < BUFFER_SIZE - 1)
         {
             qqeXlongBuffer[i] = fastAtrRsiTLBuffer[i] < rsiMaBuffer[i] ? qqeXlongBuffer[i+1] + 1 : 0;
             qqeXshortBuffer[i] = fastAtrRsiTLBuffer[i] > rsiMaBuffer[i] ? qqeXshortBuffer[i+1] + 1 : 0;
@@ -357,12 +373,6 @@ bool CalculateMRC()
     int barsCalculated = Bars(_Symbol, PERIOD_H1);
     if(barsCalculated < MRC_Length + 10)
         return false;
-    
-    ArrayResize(mrcMeanBuffer, MRC_Length + 10);
-    ArrayResize(mrcUpperInnerBuffer, MRC_Length + 10);
-    ArrayResize(mrcLowerInnerBuffer, MRC_Length + 10);
-    ArrayResize(mrcUpperOuterBuffer, MRC_Length + 10);
-    ArrayResize(mrcLowerOuterBuffer, MRC_Length + 10);
     
     double pi = 3.14159265358979323846;
     
@@ -576,7 +586,7 @@ void OpenBuyPosition()
         Print("Грешка при отваряне на BUY позиция: ", trade.ResultRetcodeDescription(), " (", error, ")");
         
         //--- Опит с различен filling mode
-        if(error == 10030) // ERR_INVALID_FILLING
+        if(error == TRADE_RETCODE_INVALID_FILL)
         {
             trade.SetTypeFilling(ORDER_FILLING_IOC);
             if(trade.Buy(lotSize, _Symbol, ask, sl, tp, "BUY Signal"))
@@ -622,7 +632,7 @@ void OpenSellPosition()
         Print("Грешка при отваряне на SELL позиция: ", trade.ResultRetcodeDescription(), " (", error, ")");
         
         //--- Опит с различен filling mode
-        if(error == 10030) // ERR_INVALID_FILLING
+        if(error == TRADE_RETCODE_INVALID_FILL)
         {
             trade.SetTypeFilling(ORDER_FILLING_IOC);
             if(trade.Sell(lotSize, _Symbol, bid, sl, tp, "SELL Signal"))
